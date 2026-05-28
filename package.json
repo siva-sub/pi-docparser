@@ -1,6 +1,6 @@
 {
   "name": "pi-docparser",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Pi package that adds document_parse, document_search, document_screenshot, and a companion skill for local document understanding with LiteParse v2.",
   "keywords": [
     "document-parse",
