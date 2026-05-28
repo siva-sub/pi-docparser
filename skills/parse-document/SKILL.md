@@ -1,8 +1,15 @@
 ---
 name: parse-document
-description: Use this skill when the user wants to parse, search, or visually inspect local documents such as PDFs, Word/DOCX files, PowerPoint/PPTX decks, Excel/XLSX/CSV spreadsheets, or images such as PNG, JPG, TIFF, and WebP. It helps the agent use the pi-docparser tools efficiently: document_parse for text/JSON extraction, document_search for phrase locations and bounding boxes, and document_screenshot for visual page inspection.
+description: >-
+  Use this skill when the user wants to parse, search, or visually inspect local documents such as PDFs,
+  Word/DOCX files, PowerPoint/PPTX decks, Excel/XLSX/CSV spreadsheets, or images such as PNG, JPG,
+  TIFF, and WebP. It helps the agent use the pi-docparser tools efficiently: document_parse for text/JSON
+  extraction, document_search for phrase locations and bounding boxes, and document_screenshot for visual
+  page inspection.
 license: MIT
-compatibility: Requires document_parse; optionally benefits from document_search and document_screenshot, such as the tools provided by the pi-docparser package.
+compatibility: >-
+  Requires document_parse; optionally benefits from document_search and document_screenshot, such as the
+  tools provided by the pi-docparser package.
 metadata:
   author: Maximilian Schwarzmüller + pi
   primary-interface: document_parse, document_search, document_screenshot tools
