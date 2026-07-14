@@ -1,8 +1,8 @@
-# pi-docparser
+# @siva-sub/pi-docparser
 
-A standalone [pi](https://shittycodingagent.ai/) package that adds local document-understanding tools plus a companion `parse-document` skill for AI agents.
+A standalone [Pi](https://pi.dev/) package that adds local document-understanding tools plus a companion `parse-document` skill for AI agents.
 
-It wraps [`@llamaindex/liteparse`](https://github.com/run-llama/liteparse) v2, a Rust/PDFium-based local parser. Documents stay on the local machine: no cloud calls, no LLM parsing, no API keys.
+This fork extends the original [`maxedapps/pi-docparser`](https://github.com/maxedapps/pi-docparser) package with LiteParse complexity detection and optional model-configurable visual understanding. Core parsing remains local by default. Visual analysis is opt-in, and remote model calls require explicit `allowCloud: true`.
 
 ## What this package provides
 
@@ -86,13 +86,13 @@ Support for non-PDF formats may depend on host tools such as LibreOffice or Imag
 ## Installation
 
 ```bash
-pi install npm:pi-docparser
+pi install npm:@siva-sub/pi-docparser
 ```
 
 Or from GitHub:
 
 ```bash
-pi install git:github.com/maxedapps/pi-docparser
+pi install git:github.com/siva-sub/pi-docparser@main
 ```
 
 ## Example model tool calls

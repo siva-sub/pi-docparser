@@ -1,7 +1,7 @@
 {
-  "name": "pi-docparser",
+  "name": "@siva-sub/pi-docparser",
   "version": "3.1.0",
-  "description": "Pi package that adds five document understanding tools, including complexity detection and model-configurable visual analysis, with LiteParse v2.",
+  "description": "Pi package for local document parsing, complexity detection, and model-configurable visual analysis with LiteParse v2.",
   "keywords": [
     "document-parse",
     "documents",
@@ -11,13 +11,18 @@
     "pdf",
     "pi",
     "pi-package",
-    "skill"
+    "skill",
+    "vision",
+    "visual-understanding"
   ],
-  "homepage": "https://maximilian-schwarzmueller.com",
+  "homepage": "https://github.com/siva-sub/pi-docparser",
+  "bugs": {
+    "url": "https://github.com/siva-sub/pi-docparser/issues"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/maxedapps/pi-docparser.git"
+    "url": "git+https://github.com/siva-sub/pi-docparser.git"
   },
   "files": [
     "assets",
@@ -31,6 +36,9 @@
     "package.json"
   ],
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "echo 'nothing to build'",
     "format": "oxfmt .",
@@ -56,8 +64,8 @@
     "vitest": "^1.6.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "^0.74.0",
-    "@earendil-works/pi-coding-agent": "^0.74.0"
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
   },
   "engines": {
     "node": ">=20.6.0"
@@ -69,6 +77,7 @@
     "skills": [
       "./skills"
     ],
-    "image": "https://raw.githubusercontent.com/maxedapps/pi-docparser/main/assets/pi-docparser-preview.jpg"
+    "minPiVersion": "0.74.0",
+    "image": "https://raw.githubusercontent.com/siva-sub/pi-docparser/main/assets/pi-docparser-preview.jpg"
   }
 }
