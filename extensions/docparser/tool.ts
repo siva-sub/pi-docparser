@@ -240,7 +240,7 @@ export function registerDocumentParseTool(pi: ExtensionAPI) {
 
         emit(`Parsing document: ${input.sourcePath}`);
         const parseResult = await parser.parse(input.resolvedPath);
-        const outputFormat = plan.parserConfig.outputFormat ?? "text";
+        const outputFormat = (plan.parserConfig.outputFormat ?? "text") as DocumentOutputFormat;
         const outputText =
           outputFormat === "json" ? JSON.stringify(parseResult, null, 2) : parseResult.text;
         const outputPath = join(outputDir, outputFormat === "json" ? "parsed.json" : "parsed.txt");

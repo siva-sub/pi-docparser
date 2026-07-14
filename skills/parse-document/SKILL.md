@@ -12,7 +12,7 @@ compatibility: >-
   tools provided by the pi-docparser package.
 metadata:
   author: Maximilian Schwarzmüller + pi
-  primary-interface: document_parse, document_search, document_screenshot tools
+  primary-interface: document_parse, document_search, document_screenshot, document_complexity, document_visual_analyze tools
 ---
 
 # Parse Document
@@ -24,8 +24,12 @@ Use the dedicated document tools as the default interface. Do not fall back to m
 - Use `document_parse` to extract text or JSON from a local document.
 - Use `document_search` to find a phrase and get page numbers plus bounding boxes for citations/source locations.
 - Use `document_screenshot` to render pages as PNG image blocks when visual layout matters.
+- Use `document_complexity` to inspect per-page signals (images, vector area, OCR needs) and identify visual-candidate pages.
+- Use `document_visual_analyze` to send candidate pages to a vision model for structured chart/diagram/table interpretation.
 
 Recommended workflow for known text: `document_search` first, then `document_screenshot` only for relevant pages.
+
+Recommended workflow for visual content: `document_complexity` first to find candidate pages, then `document_visual_analyze` on those pages.
 
 ## Efficient parsing
 
@@ -94,6 +98,33 @@ Use `document_screenshot` when text is not enough, for example:
 Keep screenshot page ranges small, usually one to four pages, unless the user explicitly asks for more.
 
 `document_parse` also supports `screenshotPages` when parsing and screenshotting should happen together, but prefer the dedicated `document_screenshot` tool for visual-only follow-up.
+
+## Complexity and visual analysis workflow
+
+### Find visual-candidate pages
+
+Use `document_complexity` when the document may contain charts, diagrams, or figures that text extraction cannot capture:
+
+- It returns per-page signals: image coverage, vector area, garbled text, and OCR needs.
+- It adds a heuristic visual-candidate score (0-1) using a noisy-OR combination of image and vector signals.
+- Pages at or above the threshold (default 0.4) are flagged as visual candidates.
+- The score is heuristic: a high score means the page carries significant non-textual content, not that a specific chart type is present.
+
+### Analyze charts and diagrams
+
+Use `document_visual_analyze` when you need structured interpretation of charts, diagrams, or tables:
+
+- Call it with explicit `pages` or let it auto-select from complexity signals.
+- It renders screenshots and sends them to the active Pi image-capable model through Pi's provider-agnostic SDK when no explicit endpoint is configured. Explicit endpoints must be OpenAI-compatible.
+- Default config is local-only; requires `allowCloud: true` for remote or cloud-routed models, even when a cloud model is reached through a loopback proxy.
+- The model and endpoint are configurable via environment variables (`PI_DOCPARSER_VISUAL_*`) or per-call parameters.
+- Findings are model-inferred descriptions with provenance. They are NOT citation geometry.
+- Pair with `document_search` for text-level citations on the same pages.
+- When the model is uncertain, surface the uncertainties list rather than the inferred values.
+
+### Important: visual findings are not citations
+
+Visual analysis findings (diagram type, title, axes, observations, nodes, edges) are model-inferred descriptions. They must not be presented as search-ready coordinates or citations. Always pair visual findings with `document_search` on the underlying text for verifiable citations.
 
 ## Follow-up workflow
 
@@ -166,6 +197,17 @@ Use `document_screenshot` with:
 
 - `pages` for the relevant page range
 - higher `dpi` only if readability is a problem
+
+### Find and analyze visual content
+
+1. Use `document_complexity` with:
+   - `visualCandidateThreshold` to adjust sensitivity (default 0.4)
+
+2. Use `document_visual_analyze` on candidate pages with:
+   - `pages` (explicit) or `maxCandidatePages` (auto-select)
+   - `focus` to guide the model (e.g. "bar chart trends", "architecture diagram")
+   - `baseUrl` and `model` pointing at a vision-capable endpoint
+   - `allowCloud: true` only when the endpoint is remote
 
 ### Parse a scanned or image-based document
 

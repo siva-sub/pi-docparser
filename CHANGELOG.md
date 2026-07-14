@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows semantic versioning.
 
+## [3.1.0] - 2026-07-14
+
+### Added
+
+- upgraded `@llamaindex/liteparse` from `2.0.1` to `2.5.1`, gaining `isComplex()` API support
+- added `document_complexity` tool: scans a document with LiteParse and returns per-page complexity signals (image coverage, vector area, garbled text, OCR needs) plus a conservative visual-candidate classification for charts, diagrams, and figures
+- added `document_visual_analyze` tool: renders candidate pages as screenshots and sends them to a vision model for structured chart/diagram/table analysis
+  - uses the active Pi model through `completeSimple()` when no explicit endpoint is configured, preserving `/model`, settings, auth, and provider-specific routing
+  - explicit per-call/environment endpoints use the OpenAI-compatible client
+  - defaults to local-only (no cloud calls); requires explicit `allowCloud=true` for remote or cloud-routed models
+  - model and endpoint are configurable via environment variables (`PI_DOCPARSER_VISUAL_BASE_URL`, `PI_DOCPARSER_VISUAL_MODEL`, `PI_DOCPARSER_VISUAL_API_KEY`, `PI_DOCPARSER_ALLOW_CLOUD`) or per-call parameters
+  - findings are model-inferred descriptions with provenance; they are separate from LiteParse text coordinates and must not be used as citation geometry
+  - supports automatic candidate-page selection from complexity signals or explicit page ranges
+
+### Changed
+
+- updated the visual-candidate scoring formula to use a noisy-OR (probability union) combination, so pages with multiple corroborating signals rank higher than pages with a single signal
+- updated README and SKILL.md to document the new tools and the recommended complexity-then-visual-analyze workflow
+
 ## [3.0.0] - 2026-05-28
 
 ### Breaking Changes

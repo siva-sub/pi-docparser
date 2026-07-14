@@ -1,6 +1,6 @@
 {
   "name": "pi-docparser",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "Pi package that adds document_parse, document_search, document_screenshot, and a companion skill for local document understanding with LiteParse v2.",
   "keywords": [
     "document-parse",
@@ -38,12 +38,13 @@
     "lint": "oxlint .",
     "lint:fix": "oxlint --fix .",
     "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
     "check:runtime": "node --input-type=module -e \"await import('./extensions/docparser/index.ts')\"",
-    "check": "oxfmt --check . && oxlint . && tsc -p tsconfig.json && node --input-type=module -e \"await import('./extensions/docparser/index.ts')\"",
+    "check": "oxfmt --check . && oxlint . && tsc -p tsconfig.json && pnpm test && node --input-type=module -e \"await import('./extensions/docparser/index.ts')\"",
     "pack:dry": "npm pack --dry-run"
   },
   "dependencies": {
-    "@llamaindex/liteparse": "2.0.1"
+    "@llamaindex/liteparse": "2.5.1"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.74.0",
@@ -51,7 +52,8 @@
     "@types/node": "^25.7.0",
     "oxfmt": "^0.49.0",
     "oxlint": "^1.64.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^1.6.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "^0.74.0",

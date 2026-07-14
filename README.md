@@ -8,15 +8,17 @@ It wraps [`@llamaindex/liteparse`](https://github.com/run-llama/liteparse) v2, a
 
 ### Extension tools
 
-This package registers three tools:
+This package registers five tools:
 
-| Tool                  | Purpose                                                                                                                    |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `document_parse`      | Parse a local document to `text` or `json`, save the full result to a temp file, and optionally render screenshots.        |
-| `document_search`     | Search a local document for a phrase and return page numbers plus bounding boxes for each hit.                             |
-| `document_screenshot` | Render document pages as PNG images, return image blocks for direct model inspection, and save PNG files to a temp folder. |
+| Tool                      | Purpose                                                                                                                                                                          |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `document_parse`          | Parse a local document to `text` or `json`, save the full result to a temp file, and optionally render screenshots.                                                              |
+| `document_search`         | Search a local document for a phrase and return page numbers plus bounding boxes for each hit.                                                                                   |
+| `document_screenshot`     | Render document pages as PNG images, return image blocks for direct model inspection, and save PNG files to a temp folder.                                                       |
+| `document_complexity`     | Inspect per-page complexity signals (images, vector area, OCR needs) and identify visual-candidate pages for vision analysis.                                                    |
+| `document_visual_analyze` | Render candidate pages and analyze screenshots with the active Pi vision model or an explicit OpenAI-compatible endpoint. Requires explicit cloud permission for remote targets. |
 
-Use `document_parse` for extraction, `document_search` for citations/source locations, and `document_screenshot` when visual layout, charts, signatures, dense tables, or page appearance matter.
+Use `document_parse` for extraction, `document_search` for citations/source locations, `document_screenshot` when visual layout, charts, signatures, dense tables, or page appearance matter, `document_complexity` to find pages that carry significant non-textual content, and `document_visual_analyze` to interpret charts and diagrams with a vision model.
 
 ### Skill
 
@@ -143,6 +145,33 @@ document_screenshot({
 
 Useful for charts, figures, signatures, dense tables, and cases where extracted text is insufficient.
 
+### Find visual-candidate pages
+
+```text
+document_complexity({
+  path: "./reports/financial-report.pdf"
+})
+```
+
+Returns per-page complexity signals and a visual-candidate score. Pages with significant images, vector graphics, or full-page scans are flagged as candidates for vision analysis. This tool does NOT identify diagram type, only flags pages worth looking at.
+
+### Analyze charts and diagrams with a vision model
+
+```text
+document_visual_analyze({
+  path: "./reports/financial-report.pdf",
+  pages: "3,7,12",
+  focus: "bar chart trends",
+  baseUrl: "http://127.0.0.1:11434/v1",
+  model: "qwen3.5:397b",
+  allowCloud: false
+})
+```
+
+Renders the selected pages as screenshots and sends them to the active Pi image-capable model through Pi's provider-agnostic SDK, or to an explicit OpenAI-compatible endpoint. The model returns diagram type, title, axes, observations, nodes/edges (for flowcharts), and uncertainties. Findings are model-inferred descriptions with provenance, separate from LiteParse text coordinates.
+
+The model and endpoint are configurable via environment variables or per-call parameters. When no explicit endpoint is supplied, the active Pi model selected with `/model`, `--model`, or settings is routed through Pi's provider-agnostic SDK. Inspect available models with `pi --list-models`, then select one such as `pi --model openai-codex/gpt-5.4-mini` or use `/model` in an interactive session. Loopback URLs (Ollama, vLLM, LM Studio) work without cloud permission, except for explicitly cloud-routed model IDs such as `*:cloud`. Remote endpoints require `allowCloud: true`.
+
 ### Parse a password-protected document
 
 ```text
@@ -186,6 +215,23 @@ document_parse({
 - Returns image content blocks the model can inspect directly.
 - Also saves screenshots to temporary files and returns their paths.
 - Can render supported non-PDF documents when required host conversion tools are installed.
+
+### `document_complexity`
+
+- Uses LiteParse's `isComplex()` API to inspect each page without a full parse.
+- Returns per-page signals: text coverage, image block count, image coverage, vector area, garbled text, and OCR needs.
+- Adds a heuristic visual-candidate score (0-1) combining image and vector signals using a noisy-OR combination.
+- Pages at or above the threshold (default 0.4) are flagged as visual candidates for `document_visual_analyze`.
+- The score is heuristic: a high score means the page carries significant non-textual content, not that a specific chart type is present.
+
+### `document_visual_analyze`
+
+- Renders selected (or auto-selected) pages as screenshots at a configurable DPI.
+- Sends images to the active Pi image-capable model through Pi's SDK when no explicit endpoint is configured, or to an OpenAI-compatible vision model for explicit endpoints.
+- Returns structured findings: diagram type, title, axes, observations, nodes/edges, annotations, uncertainties, and confidence.
+- Defaults to local-only: requires `allowCloud: true` for remote or cloud-routed models, even through a loopback proxy.
+- Model and endpoint are configurable via environment variables (`PI_DOCPARSER_VISUAL_BASE_URL`, `PI_DOCPARSER_VISUAL_MODEL`, `PI_DOCPARSER_VISUAL_API_KEY`, `PI_DOCPARSER_ALLOW_CLOUD`, `PI_DOCPARSER_VISUAL_DPI`) or per-call parameters.
+- Findings are model-inferred with provenance metadata. They are NOT citation geometry. Pair with `document_search` for text-level citations.
 
 ### OCR notes
 
