@@ -7,7 +7,7 @@
  * manager. Defaults are safe: no cloud calls, no model override, no remote URL.
  */
 
-import { normalizeRemoteUrl } from "./util.ts";
+import { isLoopbackHost, normalizeRemoteUrl } from "./util.ts";
 
 export interface VisualAnalysisConfig {
   /** Whether remote model calls are allowed. Default false. */
@@ -66,7 +66,12 @@ export function loadVisualAnalysisConfig(): VisualAnalysisConfig {
 
   let baseUrl: string | undefined;
   if (baseUrlRaw) {
-    const isLoopback = /^(https?:\/\/)?(localhost|127\.0\.0\.1|::1|0\.0\.0\.0)/i.test(baseUrlRaw);
+    let isLoopback = false;
+    try {
+      isLoopback = isLoopbackHost(new URL(baseUrlRaw).hostname);
+    } catch {
+      // Let normalizeRemoteUrl handle the invalid URL below.
+    }
     try {
       baseUrl = normalizeRemoteUrl(baseUrlRaw, { allowLoopback: isLoopback });
     } catch {
@@ -138,7 +143,7 @@ export function validateVisualAnalysisConfig(config: VisualAnalysisConfig): stri
 
   if (config.baseUrl && !config.model) {
     errors.push(
-      "model is required when baseUrl is provided (e.g. model='qwen3.5:397b' or 'gpt-5.4-mini').",
+      "model is required when baseUrl is provided (e.g. model='qwen2.5vl:7b' or 'gpt-5.4-mini').",
     );
   }
 
@@ -155,8 +160,7 @@ export function isLocalBaseUrl(baseUrl: string | undefined): boolean {
   if (!baseUrl) return false;
   try {
     const parsed = new URL(baseUrl);
-    const host = parsed.hostname.toLowerCase();
-    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "0.0.0.0";
+    return isLoopbackHost(parsed.hostname);
   } catch {
     return false;
   }

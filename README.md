@@ -163,7 +163,7 @@ document_visual_analyze({
   pages: "3,7,12",
   focus: "bar chart trends",
   baseUrl: "http://127.0.0.1:11434/v1",
-  model: "qwen3.5:397b",
+  model: "qwen2.5vl:7b",
   allowCloud: false
 })
 ```

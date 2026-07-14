@@ -104,12 +104,16 @@ describe("util", () => {
     expect(() => normalizeRemoteUrl("not a url")).toThrow();
   });
 
-  it("normalizeRemoteUrl rejects loopback unless allowLoopback", () => {
+  it("normalizes loopback hosts consistently, including IPv6 and localhost subdomains", () => {
     expect(() => normalizeRemoteUrl("http://localhost:11434/v1")).toThrow(/loopback/);
     expect(() => normalizeRemoteUrl("http://127.0.0.1:11434/v1")).toThrow(/loopback/);
-    expect(normalizeRemoteUrl("http://127.0.0.1:11434/v1", { allowLoopback: true })).toBe(
-      "http://127.0.0.1:11434/v1",
+    expect(() => normalizeRemoteUrl("http://[::1]:11434/v1")).toThrow(/loopback/);
+    expect(() => normalizeRemoteUrl("http://worker.localhost:11434/v1")).toThrow(/loopback/);
+    expect(normalizeRemoteUrl("http://[::1]:11434/v1", { allowLoopback: true })).toBe(
+      "http://[::1]:11434/v1",
     );
+    expect(isLocalBaseUrl("http://[::1]:11434/v1")).toBe(true);
+    expect(isLocalBaseUrl("http://worker.localhost:11434/v1")).toBe(true);
   });
 
   it("maskSecret keeps first 4 chars and ellipsis", () => {

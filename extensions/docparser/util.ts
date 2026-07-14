@@ -8,6 +8,17 @@ import { extname, isAbsolute, join, resolve as resolvePath } from "node:path";
  * Rejects any non-HTTP(S) scheme. Throws on user input. Designed to be safe to
  * include in error messages without leaking secrets.
  */
+export function isLoopbackHost(host: string): boolean {
+  const normalized = host.toLowerCase().replace(/^\[|\]$/g, "");
+  return (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1" ||
+    normalized === "0.0.0.0" ||
+    normalized.endsWith(".localhost")
+  );
+}
+
 export function normalizeRemoteUrl(
   input: string,
   options: { allowLoopback?: boolean } = {},
@@ -33,13 +44,7 @@ export function normalizeRemoteUrl(
 
   if (!options.allowLoopback) {
     const host = parsed.hostname.toLowerCase();
-    if (
-      host === "localhost" ||
-      host === "127.0.0.1" ||
-      host === "::1" ||
-      host === "0.0.0.0" ||
-      host.endsWith(".localhost")
-    ) {
+    if (isLoopbackHost(host)) {
       throw new Error(
         `Remote URL host ${host} is loopback. Loopback URLs are not remote and must not be passed with allowCloud.`,
       );
