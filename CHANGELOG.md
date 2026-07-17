@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows semantic versioning.
 
+## [3.3.0] - 2026-07-18
+
+### Added
+
+- **`document_batch_parse` tool**: concurrent multi-document parsing with progress tracking, per-item error handling, and LRU result caching
+- **`document_batch_complexity` tool**: quick complexity scan across multiple documents to find visual candidates, with star ratings (★★★)
+- **LRU result cache** (`DocumentCache`): in-memory cache keyed by file hash (path + mtime + size) to avoid re-parsing in a session
+- **Auto-pipeline stage indicators**: `document_visual_analyze` now shows 📋 Stage 1/3, 🎨 Stage 2/3, 🤖 Stage 3/3 during auto-pipeline
+- Concurrency limiter (`runWithConcurrency`) for batch operations (1-8 workers)
+
 ## [3.2.0] - 2026-07-18
 
 ### Added

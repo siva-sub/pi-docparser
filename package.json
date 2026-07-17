@@ -1,6 +1,6 @@
 {
   "name": "@siva-sub/pi-docparser",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "description": "Pi package for local document parsing, complexity detection, and model-configurable visual analysis with LiteParse v2.",
   "keywords": [
     "document-parse",

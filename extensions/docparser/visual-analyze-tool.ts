@@ -316,8 +316,9 @@ export function registerDocumentVisualAnalyzeTool(pi: ExtensionAPI) {
             );
           }
           pages = selection.pageNumbers;
+          emit(`Pages specified: ${pages.join(", ")} (${pages.length} page(s))`);
         } else {
-          emit("Auto-selecting visual candidate pages...");
+          emit("📋 Stage 1/3: Scanning for visual candidates...");
           const { LiteParse } = await loadLiteParseModule();
           const parser = new LiteParse({
             ocrEnabled: false,
@@ -329,7 +330,7 @@ export function registerDocumentVisualAnalyzeTool(pi: ExtensionAPI) {
           const complexity = stats.map((s) => toComplexityPage(s, { threshold: 0.4 }));
           pages = selectCandidatePageNumbers(complexity, {
             threshold: 0.4,
-            maxPages: params.maxCandidatePages ?? 6,
+            maxPages: params.maxCandidatePages ?? merged.maxCandidatePages,
           });
           if (pages.length === 0) {
             return {
@@ -422,9 +423,9 @@ export function registerDocumentVisualAnalyzeTool(pi: ExtensionAPI) {
         }
 
         emit(
-          `Using model: ${summarizeConfig({ baseUrl, model, apiKey })} (source: ${resolved.source})`,
+          `🔍 Using model: ${summarizeConfig({ baseUrl, model, apiKey })} (source: ${resolved.source})`,
         );
-        emit("Rendering screenshots and calling vision model...");
+        emit("🎨 Stage 2/3: Rendering screenshots...");
 
         const analyzePage =
           resolved.kind === "pi"
@@ -480,6 +481,8 @@ export function registerDocumentVisualAnalyzeTool(pi: ExtensionAPI) {
                   .trim();
               }
             : undefined;
+
+        emit("🤖 Stage 3/3: Analyzing with vision model...");
 
         const result = await runVisualAnalysis({
           resolvedPath: input.resolvedPath,
