@@ -58,10 +58,6 @@ export interface PiDocparserConfig {
   /** Default max search results (1–500). */
   maxSearchResults: number;
 
-  // -- Screenshot defaults --
-  /** Default DPI for screenshot rendering (72–600). */
-  screenshotDpi: number;
-
   // -- Vision model selection --
   /** Preferred vision model as "provider/id". null = auto-select from registry. */
   visionModel: string | null;
@@ -118,8 +114,6 @@ export const DEFAULT_CONFIG: PiDocparserConfig = {
   // Search
   caseSensitive: false,
   maxSearchResults: 50,
-  // Screenshots
-  screenshotDpi: 150,
   // Vision model
   visionModel: null,
   autoSelectVisionModel: true,
@@ -212,10 +206,7 @@ export function normalizeConfig(raw: unknown): PiDocparserConfig {
   }
 
   // -- Screenshots --
-  if (typeof obj.screenshotDpi === "number" && Number.isFinite(obj.screenshotDpi)) {
-    const dpi = Math.floor(obj.screenshotDpi);
-    if (dpi >= 72 && dpi <= 600) base.screenshotDpi = dpi;
-  }
+  // screenshotDpi removed — use visualDpi for screenshots too
 
   // -- Vision model --
   if (typeof obj.visionModel === "string") {

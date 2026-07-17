@@ -85,12 +85,13 @@ export class DocparserSettingsComponent implements Component {
   private flatSettings: { groupIdx: number; settingIdx: number }[] = [];
   private selectedIndex = 0;
   private readonly maxVisible = 12;
+  private searchInput: Input;
   private listContainer: Container;
   private footerText: Text;
 
   private _focused = false;
   get focused(): boolean { return this._focused; }
-  set focused(value: boolean) { this._focused = value; }
+  set focused(value: boolean) { this._focused = value; this.searchInput.focused = value; }
 
   /** When non-null, we're in an inline sub-picker (enum/model choice). */
   private subPicker: {
@@ -116,6 +117,7 @@ export class DocparserSettingsComponent implements Component {
       reasoning?: boolean;
     }>,
     done: (result: DocparserSettingsResult) => void,
+    focusSection?: string,
   ) {
     this.theme = theme;
     this.done = done;
@@ -126,8 +128,10 @@ export class DocparserSettingsComponent implements Component {
 
     this.groups = this.buildGroups(visionRefs);
     this.flatSettings = this.buildFlat();
-    this.selectFirstSetting();
+    this.selectFirstSetting(focusSection);
 
+    this.searchInput = new Input();
+    this.searchInput.onSubmit = () => this.onConfirm();
     this.listContainer = new Container();
     this.footerText = new Text(this.getFooterText(), 0, 0);
 
@@ -146,14 +150,23 @@ export class DocparserSettingsComponent implements Component {
     lines.push(
       this.theme.fg(
         "muted",
-        this.numberEditor
-          ? `Editing: ${this.numberEditor.settingKey} — type value, enter to confirm, esc to cancel`
-          : this.subPicker
-            ? `Choose value for ${this.subPicker.settingKey} — arrows/enter to pick, esc to cancel`
-            : "Arrow keys to navigate · Enter to toggle/edit · Esc to save & exit",
+        "Type to filter settings · Enter to toggle/edit · Esc to save & exit",
       ),
     );
     lines.push("");
+
+    // Show search input when not in sub-picker/editor
+    if (!this.numberEditor && !this.subPicker) {
+      lines.push(...this.searchInput.render(width));
+      lines.push("");
+    } else if (this.numberEditor) {
+      lines.push(this.theme.fg("accent", `  ${this.numberEditor.settingKey}: ${this.numberEditor.value}_`));
+      lines.push("");
+    } else if (this.subPicker) {
+      lines.push(this.theme.fg("accent", `  Choose value for ${this.subPicker.settingKey}:`));
+      lines.push("");
+    }
+
     lines.push(...this.listContainer.render(width));
     lines.push("");
     lines.push(...this.footerText.render(width));
@@ -176,9 +189,9 @@ export class DocparserSettingsComponent implements Component {
         const num = parseFloat(this.numberEditor.value);
         if (!isNaN(num) && def) {
           if (def.min !== undefined && num < def.min) {
-            // clamp
+            // clamp silently
           } else if (def.max !== undefined && num > def.max) {
-            // clamp
+            // clamp silently
           } else {
             (this.config as any)[this.numberEditor.settingKey] =
               def.kind === "number" && Number.isInteger(num) ? Math.floor(num) : num;
@@ -223,7 +236,11 @@ export class DocparserSettingsComponent implements Component {
       }
       if (kb.matches(data, "tui.select.confirm")) {
         const val = this.subPicker.options[this.subPicker.selectedIdx]!;
-        (this.config as any)[this.subPicker.settingKey] = val;
+        if (this.subPicker.settingKey === "visionModel") {
+          this.config.visionModel = val === "⟳ Auto" ? null : val;
+        } else {
+          (this.config as any)[this.subPicker.settingKey] = val;
+        }
         this.subPicker = null;
         this.updateList();
         return;
@@ -231,7 +248,7 @@ export class DocparserSettingsComponent implements Component {
       return;
     }
 
-    // ── Main list navigation ──
+    // ── Main list: forward search typing to searchInput ──
     if (kb.matches(data, "tui.select.up")) {
       if (this.flatSettings.length === 0) return;
       this.selectedIndex =
@@ -268,19 +285,29 @@ export class DocparserSettingsComponent implements Component {
     }
 
     if (matchesKey(data, Key.ctrl("c"))) {
-      this.finish(true);
+      if (this.searchInput.getValue()) {
+        this.searchInput.setValue("");
+        this.refresh();
+      } else {
+        this.finish(true);
+      }
       return;
     }
 
     // Reset to defaults
     if (matchesKey(data, Key.ctrl("r"))) {
       this.config = { ...DEFAULT_CONFIG };
-      this.updateList();
+      this.refresh();
       return;
     }
+
+    // Forward all other input to search for fuzzy filtering
+    this.searchInput.handleInput(data);
+    this.refresh();
   }
 
   invalidate(): void {
+    this.searchInput.invalidate();
     this.listContainer.invalidate();
     this.footerText.invalidate();
   }
@@ -310,13 +337,6 @@ export class DocparserSettingsComponent implements Component {
         settings: [
           { key: "caseSensitive", label: "Case Sensitive", kind: "boolean", desc: "Default for case-sensitive document search." },
           { key: "maxSearchResults", label: "Max Results", kind: "number", desc: "Maximum search hits to return (1–500).", min: 1, max: 500 },
-        ],
-      },
-      {
-        icon: "📸",
-        label: "Screenshots",
-        settings: [
-          { key: "screenshotDpi", label: "Screenshot DPI", kind: "number", desc: "Default DPI for document screenshot rendering (72–600).", min: 72, max: 600 },
         ],
       },
       {
@@ -361,11 +381,12 @@ export class DocparserSettingsComponent implements Component {
     return flat;
   }
 
-  private selectFirstSetting(): void {
-    // Find first vision model setting to start there (or first setting)
+  private selectFirstSetting(focusSection?: string): void {
+    // Jump to specified section, or default to Vision
+    const targetSection = focusSection ?? "Vision";
     const idx = this.flatSettings.findIndex((f) => {
-      const s = this.groups[f.groupIdx]!.settings[f.settingIdx]!;
-      return s.key === "visionModel";
+      const g = this.groups[f.groupIdx]!;
+      return g.label === targetSection;
     });
     this.selectedIndex = idx >= 0 ? idx : 0;
   }
@@ -381,15 +402,44 @@ export class DocparserSettingsComponent implements Component {
 
   private getFooterText(): string {
     const count = this.flatSettings.length;
+    const q = this.searchInput.getValue();
     const parts: string[] = [
       `${keyText("tui.select.confirm")} toggle/edit`,
       "ctrl+s save",
       "esc save & exit",
       "ctrl+c discard",
       "ctrl+r reset all",
-      `${count} settings`,
+      q ? `${this.flatSettings.length}/${count} match` : `${count} settings`,
     ];
     return this.theme.fg("dim", `  ${parts.join(" · ")} `);
+  }
+
+  /** Fuzzy filter settings list by search query. */
+  private refresh(): void {
+    const query = this.searchInput.getValue().toLowerCase();
+    const allFlat = this.buildFlat();
+
+    if (!query) {
+      this.flatSettings = allFlat;
+    } else {
+      this.flatSettings = allFlat.filter((f) => {
+        const s = this.groups[f.groupIdx]!.settings[f.settingIdx]!;
+        const g = this.groups[f.groupIdx]!;
+        return (
+          s.label.toLowerCase().includes(query) ||
+          s.key.toLowerCase().includes(query) ||
+          s.desc.toLowerCase().includes(query) ||
+          g.label.toLowerCase().includes(query)
+        );
+      });
+      // Try to keep position near where we were
+      if (this.flatSettings.length > 0) {
+        this.selectedIndex = Math.min(this.selectedIndex, this.flatSettings.length - 1);
+      } else {
+        this.selectedIndex = 0;
+      }
+    }
+    this.updateList();
   }
 
   private onConfirm(): void {
