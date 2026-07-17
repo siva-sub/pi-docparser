@@ -4,7 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows semantic versioning.
 
-## [3.1.0] - 2026-07-14
+## [3.2.0] - 2026-07-18
+
+### Added
+
+- **Persistent config file** (`~/.pi/agent/extensions/pi-docparser.json`) with settings for vision model, DPI, thinking, cache, and cloud safety
+- **Multi-tier model resolution** for `document_visual_analyze`: per-call params > env vars > persisted config > registry auto-select > active model
+- **Auto-select from pi model registry**: when no vision model is configured, the tool scans all configured models and picks the first image-capable one (like `pi-vision-handoff`'s pattern)
+- **`/docparser-model` command**: interactive picker to choose a vision model, plus `status`, `auto`, `clear`, and `thinking` subcommands
+- **`isVisionModel()` helper** — checks `model.input.includes("image")` following the same convention as `pi-vision-handoff`
+- **Config helpers**: `readConfig()`, `writeConfig()`, `normalizeConfig()`, `findVisionModels()`, `resolveModelRef()`, `parseModelRef()`, `formatModelRef()`
+
+### Changed
+
+- `loadVisualAnalysisConfig()` now integrates with the persisted config via `loadMergedConfig()`
+- Error messages now list available vision-capable models when resolution fails
+- Thinking level list aligned with pi-ai's `ThinkingLevel` type (removed unsupported `"max"` level)
+
+### Fixed
+
+- `document_visual_analyze` no longer fails silently when the active model is text-only — it auto-selects a vision model from the registry
 
 ### Added
 

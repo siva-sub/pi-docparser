@@ -1,5 +1,5 @@
 import { completeSimple, type Static, type Api, type Model } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { DEFAULT_MAX_PAGES } from "./constants.ts";
 import { appendDoctorHint, getMissingHostDependencyMessage } from "./deps.ts";
@@ -8,6 +8,7 @@ import { getProvidedRemovedV1Options, getRemovedV1OptionsMessage } from "./litep
 import { loadLiteParseModule } from "./liteparse-module.ts";
 import {
   loadVisualAnalysisConfig,
+  loadMergedConfig,
   isLocalBaseUrl,
   isRemoteVisualTarget,
   validateVisualAnalysisConfig,
@@ -18,6 +19,16 @@ import { runVisualAnalysis, describeFinding, summarizeConfig } from "./visual-ru
 import type { DocumentVisualAnalyzeDetails } from "./visual-tool-types.ts";
 import { maskSecret, normalizeRemoteUrl } from "./util.ts";
 import { VISUAL_ANALYSIS_SYSTEM_PROMPT, buildVisualAnalysisUserText } from "./visual-client.ts";
+import {
+  type PiDocparserConfig,
+  type RegistryModelEntry,
+  readConfig,
+  writeConfig,
+  findVisionModels,
+  resolveModelRef,
+  isVisionModel,
+  isThinkingLevel,
+} from "./config.ts";
 
 type DocumentVisualAnalyzeParams = Static<typeof DocumentVisualAnalyzeSchema>;
 
@@ -38,9 +49,15 @@ function buildFriendlyErrorMessage(error: unknown): string {
 }
 
 /**
- * Resolve a vision-capable model in explicit per-call, environment, then
- * active-Pi order. Active-Pi calls use Pi's provider-agnostic SDK so `/model`,
- * `--model`, settings, auth, and provider-specific APIs are respected.
+ * Resolve a vision-capable model in priority order:
+ *   1. Per-call params (baseUrl + model)
+ *   2. Environment variables (PI_DOCPARSER_VISUAL_*)
+ *   3. Persisted config (visionModel ref → registry lookup)
+ *   4. Auto-select first vision model from registry
+ *   5. Active pi session model (if image-capable)
+ *
+ * Explicit endpoint (tiers 1-2) uses an OpenAI-compatible client.
+ * Registry-resolved models (tiers 3-5) use Pi's provider-agnostic SDK.
  */
 type ResolvedVisualModel =
   | {
@@ -64,7 +81,9 @@ async function resolveVisualModel(
   ctx: ExtensionContext,
   params: DocumentVisualAnalyzeParams,
   envConfig: ReturnType<typeof loadVisualAnalysisConfig>,
+  persistedConfig: PiDocparserConfig,
 ): Promise<ResolvedVisualModel | null> {
+  // Tier 1: Per-call params
   const hasCallOverride = params.baseUrl !== undefined || params.model !== undefined;
   if (hasCallOverride) {
     if (!params.baseUrl || !params.model) {
@@ -79,6 +98,7 @@ async function resolveVisualModel(
     };
   }
 
+  // Tier 2: Environment variables
   const hasEnvOverride = envConfig.baseUrl !== undefined || envConfig.model !== undefined;
   if (hasEnvOverride) {
     if (!envConfig.baseUrl || !envConfig.model) {
@@ -95,20 +115,69 @@ async function resolveVisualModel(
     };
   }
 
-  const activeModel = ctx.model as Model<Api> | undefined;
-  if (!activeModel || !activeModel.input.includes("image")) return null;
+  // Tier 3: Persisted config visionModel ref → registry lookup
+  if (persistedConfig.visionModel) {
+    const ref = persistedConfig.visionModel;
+    const registryModel = ctx.modelRegistry.find(
+      ...(ref.split("/") as [string, string]),
+    ) as Model<Api> | undefined;
+    if (registryModel && isVisionModel(registryModel)) {
+      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(registryModel);
+      if (auth.ok) {
+        return {
+          kind: "pi",
+          baseUrl: registryModel.baseUrl,
+          model: registryModel.id,
+          apiKey: auth.apiKey,
+          headers: auth.headers,
+          piModel: registryModel,
+          source: `persisted config (${ref})`,
+        };
+      }
+      throw new Error(
+        `Persisted vision model ${ref} authentication failed: ${auth.error}`,
+      );
+    }
+    // Model not found or not vision-capable — fall through to auto-select.
+  }
 
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(activeModel);
-  if (!auth.ok) throw new Error(`Active Pi model authentication is unavailable: ${auth.error}`);
-  return {
-    kind: "pi",
-    baseUrl: activeModel.baseUrl,
-    model: activeModel.id,
-    apiKey: auth.apiKey,
-    headers: auth.headers,
-    piModel: activeModel,
-    source: `active Pi model (${activeModel.provider}/${activeModel.id})`,
-  };
+  // Tier 4: Auto-select first vision model from registry
+  if (persistedConfig.autoSelectVisionModel) {
+    const allModels = ctx.modelRegistry.getAll() as Model<Api>[];
+    const firstVisionModel = allModels.find((m) => isVisionModel(m));
+    if (firstVisionModel) {
+      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(firstVisionModel);
+      if (auth.ok) {
+        return {
+          kind: "pi",
+          baseUrl: firstVisionModel.baseUrl,
+          model: firstVisionModel.id,
+          apiKey: auth.apiKey,
+          headers: auth.headers,
+          piModel: firstVisionModel,
+          source: `auto-selected from registry (${firstVisionModel.provider}/${firstVisionModel.id})`,
+        };
+      }
+    }
+  }
+
+  // Tier 5: Active pi model
+  const activeModel = ctx.model as Model<Api> | undefined;
+  if (activeModel && isVisionModel(activeModel)) {
+    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(activeModel);
+    if (!auth.ok) throw new Error(`Active Pi model authentication is unavailable: ${auth.error}`);
+    return {
+      kind: "pi",
+      baseUrl: activeModel.baseUrl,
+      model: activeModel.id,
+      apiKey: auth.apiKey,
+      headers: auth.headers,
+      piModel: activeModel,
+      source: `active Pi model (${activeModel.provider}/${activeModel.id})`,
+    };
+  }
+
+  return null;
 }
 
 function serializeFindings(result: Awaited<ReturnType<typeof runVisualAnalysis>>): string {
@@ -229,9 +298,12 @@ export function registerDocumentVisualAnalyzeTool(pi: ExtensionAPI) {
         }
 
         const envConfig = loadVisualAnalysisConfig();
+        const persistedConfig = readConfig();
+        const merged = loadMergedConfig();
+
         const allowCloud =
-          params.allowCloud !== undefined ? params.allowCloud : envConfig.allowCloud;
-        const dpi = params.dpi ?? envConfig.dpi;
+          params.allowCloud !== undefined ? params.allowCloud : merged.allowCloud;
+        const dpi = params.dpi ?? merged.visualDpi;
         const focus = params.focus ?? "chart or diagram";
 
         // Determine which pages to analyze.
@@ -289,12 +361,22 @@ export function registerDocumentVisualAnalyzeTool(pi: ExtensionAPI) {
           emit(`Selected ${pages.length} candidate page(s): ${pages.join(", ")}`);
         }
 
-        const resolved = await resolveVisualModel(ctx, params, envConfig);
+        const resolved = await resolveVisualModel(ctx, params, envConfig, persistedConfig);
         if (!resolved) {
+          const allModels = ctx.modelRegistry.getAll() as Model<Api>[];
+          const visionModels = allModels.filter((m) => isVisionModel(m));
+          const visionRefs = visionModels
+            .map((m) => `${m.provider}/${m.id}`)
+            .join(", ");
           const activeModel = ctx.model as Model<Api> | undefined;
-          const activeLabel = activeModel ? `${activeModel.provider}/${activeModel.id}` : "(none)";
+          const activeLabel = activeModel
+            ? `${activeModel.provider}/${activeModel.id}`
+            : "(none)";
+          const visionHint = visionRefs
+            ? `Available vision models in your registry: ${visionRefs}. Configure one with PI_DOCPARSER_VISUAL_BASE_URL and PI_DOCPARSER_VISUAL_MODEL, or use /docparser-model to pick one.`
+            : "No vision-capable models found in your registry. Configure a vision model with /model or PI_DOCPARSER_VISUAL_* env vars.";
           throw new Error(
-            `No image-capable model is available for visual analysis. Active model ${activeLabel} does not accept images. Select an image-capable model with /model or configure a local OpenAI-compatible endpoint with PI_DOCPARSER_VISUAL_BASE_URL and PI_DOCPARSER_VISUAL_MODEL. Inspect choices with pi --list-models.`,
+            `No image-capable model is available for visual analysis. Active model ${activeLabel} does not accept images. ${visionHint}`,
           );
         }
 
@@ -443,3 +525,194 @@ export const __testing = {
   normalizeRemoteUrl,
   resolveVisualModel: null as unknown,
 };
+
+// ---------------------------------------------------------------------------
+// /docparser-model command
+// ---------------------------------------------------------------------------
+
+const MODEL_COMMAND = "docparser-model";
+const MODEL_COMMAND_DESCRIPTION =
+  "Configure the vision model for document_visual_analyze — pick from all models or set directly";
+
+function showModelStatus(ctx: ExtensionCommandContext): void {
+  const cfg = readConfig();
+  const lines: string[] = [];
+  lines.push(`docparser vision model: ${cfg.visionModel ?? "(auto-select from registry)"}`);
+  lines.push(`Auto-select: ${cfg.autoSelectVisionModel ? "on" : "off"}`);
+  lines.push(`DPI: ${cfg.visualDpi} · allowCloud: ${cfg.allowCloud ? "yes" : "no"}`);
+  lines.push(`Thinking: ${cfg.thinking ? `on (${cfg.thinkingLevel})` : "off"}`);
+  lines.push(`Max candidate pages: ${cfg.maxCandidatePages} · threshold: ${cfg.visualCandidateThreshold}`);
+  lines.push(`Cache: ${cfg.cacheMax} entries`);
+
+  const allModels = ctx.modelRegistry.getAll();
+  const { vision } = findVisionModels(allModels);
+  lines.push(
+    `Registry: ${vision.length} vision-capable model(s) available`,
+  );
+  if (vision.length > 0) {
+    lines.push(
+      `  ${vision.map((m) => `${m.provider}/${m.id}${cfg.visionModel === `${m.provider}/${m.id}` ? " ✓" : ""}`).join(", ")}`,
+    );
+  }
+
+  ctx.ui.notify(lines.join("\n"), "info");
+}
+
+async function showModelPicker(ctx: ExtensionCommandContext): Promise<void> {
+  if (!ctx.hasUI) {
+    ctx.ui.notify(
+      "/docparser-model requires interactive mode. Set directly with /docparser-model <provider/id>.",
+      "error",
+    );
+    return;
+  }
+
+  const cfg = readConfig();
+  const allModels = ctx.modelRegistry.getAll();
+  const { vision, textOnly } = findVisionModels(allModels);
+
+  // Build display list: None, then vision models (👁), then text-only.
+  const items: { label: string; ref: string | null; desc: string }[] = [
+    { label: "None (auto-select from registry)", ref: null, desc: "" },
+  ];
+  for (const m of vision) {
+    const current = cfg.visionModel === `${m.provider}/${m.id}` ? " (current)" : "";
+    items.push({
+      label: `👁 ${m.provider}/${m.id}${current}`,
+      ref: `${m.provider}/${m.id}`,
+      desc: m.name ?? "",
+    });
+  }
+  for (const m of textOnly) {
+    items.push({
+      label: `  ${m.provider}/${m.id}`,
+      ref: `${m.provider}/${m.id}`,
+      desc: m.name ?? "",
+    });
+  }
+
+  // Use interactive select for both TUI and non-TUI modes
+  const labels = items.map((it) => it.label);
+  const picked = await ctx.ui.select("Vision model for docparser", labels);
+  if (picked === undefined) return;
+  const idx = labels.indexOf(picked);
+  if (idx < 0) return;
+  const selected = items[idx];
+  const updated = { ...cfg, visionModel: selected.ref };
+  const path = writeConfig(updated);
+  ctx.ui.notify(
+    selected.ref
+      ? `Docparser vision model set to ${selected.ref}. Config: ${path}`
+      : "Docparser vision model cleared. Will auto-select from registry.",
+    "info",
+  );
+}
+
+export function registerModelCommand(pi: ExtensionAPI): void {
+  pi.registerCommand(MODEL_COMMAND, {
+    description: MODEL_COMMAND_DESCRIPTION,
+    getArgumentCompletions(prefix: string) {
+      const subcommands = ["status", "auto", "clear", "thinking"];
+      const matches = subcommands.filter((s) => s.startsWith(prefix));
+      return matches.length > 0 ? matches.map((s) => ({ value: s, label: s })) : null;
+    },
+    handler: async (args, ctx) => {
+      const parts = args.trim().split(/\s+/);
+      const subcommand = parts[0]?.toLowerCase() ?? "";
+      const rest = parts.slice(1).join(" ");
+
+      if (!subcommand || subcommand === "select") {
+        // Check if argument looks like a provider/id ref
+        const ref = subcommand.includes("/") ? subcommand : rest.includes("/") ? rest : null;
+        if (ref) {
+          const cfg = readConfig();
+          const updated = { ...cfg, visionModel: ref };
+          const path = writeConfig(updated);
+          ctx.ui.notify(
+            `Docparser vision model set to ${ref}. Config: ${path}`,
+            "info",
+          );
+          return;
+        }
+        await showModelPicker(ctx);
+        return;
+      }
+
+      if (subcommand === "help") {
+        ctx.ui.notify(
+          [
+            "docparser-model commands:",
+            "  /docparser-model                  Open picker to choose the vision model",
+            "  /docparser-model <provider/id>    Set the vision model directly",
+            "  /docparser-model status           Show current config and available models",
+            "  /docparser-model auto             Clear preference, auto-select from registry",
+            "  /docparser-model clear            Same as auto",
+            "  /docparser-model thinking <off|minimal|low|medium|high|xhigh|max>",
+            "                                    Set thinking effort (off disables)",
+            "",
+            "Config: ~/.pi/agent/extensions/pi-docparser.json",
+            "Resolution: per-call > env vars > persisted > registry auto-select > active model",
+          ].join("\n"),
+          "info",
+        );
+        return;
+      }
+
+      if (subcommand === "status") {
+        showModelStatus(ctx);
+        return;
+      }
+
+      if (subcommand === "auto" || subcommand === "clear") {
+        const cfg = readConfig();
+        const updated = { ...cfg, visionModel: null, autoSelectVisionModel: true };
+        const path = writeConfig(updated);
+        ctx.ui.notify(
+          `Docparser vision model cleared. Will auto-select from registry. Config: ${path}`,
+          "info",
+        );
+        return;
+      }
+
+      if (subcommand === "thinking") {
+        const level = rest.toLowerCase();
+        const cfg = readConfig();
+        if (level === "off") {
+          const updated = { ...cfg, thinking: false };
+          const path = writeConfig(updated);
+          ctx.ui.notify(`Thinking disabled. Config: ${path}`, "info");
+        } else if (isThinkingLevel(level)) {
+          const updated = { ...cfg, thinking: true, thinkingLevel: level };
+          const path = writeConfig(updated);
+          ctx.ui.notify(
+            `Thinking enabled (${level}). Config: ${path}`,
+            "info",
+          );
+        } else {
+          ctx.ui.notify(
+            `Invalid thinking level "${level}". Use: off, minimal, low, medium, high, xhigh, max`,
+            "warning",
+          );
+        }
+        return;
+      }
+
+      // Unknown subcommand — treat as potentially a model ref
+      if (subcommand.includes("/")) {
+        const cfg = readConfig();
+        const updated = { ...cfg, visionModel: subcommand };
+        const path = writeConfig(updated);
+        ctx.ui.notify(
+          `Docparser vision model set to ${subcommand}. Config: ${path}`,
+          "info",
+        );
+        return;
+      }
+
+      ctx.ui.notify(
+        `Unknown subcommand "${subcommand}". Use /docparser-model help for usage.`,
+        "warning",
+      );
+    },
+  });
+}

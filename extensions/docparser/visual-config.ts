@@ -1,12 +1,17 @@
 /**
  * Settings helpers for the visual analysis feature.
  *
- * Pi extensions do not expose a first-class settings API for registering custom
- * persistent config. We use the existing pattern of reading environment
- * variables (PI_DOCPARSER_*) which the user can put in `~/.bashrc` or process
- * manager. Defaults are safe: no cloud calls, no model override, no remote URL.
+ * Resolution order (highest to lowest priority):
+ *   1. Per-call tool params (baseUrl, model, apiKey, dpi, allowCloud)
+ *   2. Environment variables (PI_DOCPARSER_VISUAL_*)
+ *   3. Persisted config (~/.pi/agent/extensions/pi-docparser.json)
+ *   4. Auto-select from pi model registry (first vision-capable model)
+ *   5. Active pi session model (if image-capable)
+ *
+ * Defaults are safe: no cloud calls, no model override, no remote URL.
  */
 
+import { type PiDocparserConfig, readConfig } from "./config.ts";
 import { isLoopbackHost, normalizeRemoteUrl } from "./util.ts";
 
 export interface VisualAnalysisConfig {
@@ -164,4 +169,43 @@ export function isLocalBaseUrl(baseUrl: string | undefined): boolean {
   } catch {
     return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Merged config: env vars + persisted file
+// ---------------------------------------------------------------------------
+
+/**
+ * Load persisted config from disk, with environment variable overrides applied.
+ *
+ * Environment variables (PI_DOCPARSER_*) take precedence over the persisted
+ * file. The persisted file + env overrides are then further overridden by
+ * per-call params at the tool execution layer.
+ */
+export function loadMergedConfig(): PiDocparserConfig & {
+  envBaseUrl?: string;
+  envModel?: string;
+  envApiKey?: string;
+  envAllowCloud?: boolean;
+  envDpi?: number;
+} {
+  const persisted = readConfig();
+  const envConfig = loadVisualAnalysisConfig();
+
+  return {
+    ...persisted,
+    // Env overrides for the explicit-endpoint path
+    envBaseUrl: envConfig.baseUrl,
+    envModel: envConfig.model,
+    envApiKey: envConfig.apiKey,
+    envAllowCloud: envConfig.allowCloud !== VISUAL_CONFIG_DEFAULTS.allowCloud
+      ? envConfig.allowCloud
+      : undefined,
+    envDpi: envConfig.dpi !== VISUAL_CONFIG_DEFAULTS.dpi ? envConfig.dpi : undefined,
+    // Env DPI also overrides persisted visualDpi
+    visualDpi: envConfig.dpi !== VISUAL_CONFIG_DEFAULTS.dpi ? envConfig.dpi : persisted.visualDpi,
+    allowCloud: envConfig.allowCloud !== VISUAL_CONFIG_DEFAULTS.allowCloud
+      ? envConfig.allowCloud
+      : persisted.allowCloud,
+  };
 }

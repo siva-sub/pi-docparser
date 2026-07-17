@@ -5,7 +5,7 @@ import { registerDocumentParseTool } from "./tool.ts";
 import { registerDocumentSearchTool } from "./search-tool.ts";
 import { registerDocumentScreenshotTool } from "./screenshot-tool.ts";
 import { registerDocumentComplexityTool } from "./complexity-tool.ts";
-import { registerDocumentVisualAnalyzeTool } from "./visual-analyze-tool.ts";
+import { registerDocumentVisualAnalyzeTool, registerModelCommand } from "./visual-analyze-tool.ts";
 
 export default function parseDocumentExtension(pi: ExtensionAPI) {
   registerDocumentParseTool(pi);
@@ -13,5 +13,6 @@ export default function parseDocumentExtension(pi: ExtensionAPI) {
   registerDocumentScreenshotTool(pi);
   registerDocumentComplexityTool(pi);
   registerDocumentVisualAnalyzeTool(pi);
+  registerModelCommand(pi);
   registerDoctorCommand(pi);
 }
