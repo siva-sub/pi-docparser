@@ -34,6 +34,34 @@ export function getConfigPath(): string {
 // ---------------------------------------------------------------------------
 
 export interface PiDocparserConfig {
+  // -- Parsing defaults --
+  /** Default DPI for document parsing / OCR (72–600). */
+  defaultDpi: number;
+  /** Default OCR language (ISO 639-3 code, e.g. "eng"). */
+  defaultOcrLanguage: string;
+  /** Whether OCR is enabled by default. */
+  ocrEnabled: boolean;
+  /** Default max pages to parse (1–10000). */
+  defaultMaxPages: number;
+  /** Default output format. */
+  defaultOutputFormat: "text" | "json";
+  /** How to handle images in parsed output: off, placeholder, embed. */
+  imageMode: "off" | "placeholder" | "embed";
+  /** Whether to extract hyperlinks from the document. */
+  extractLinks: boolean;
+  /** Whether to preserve very small text that would otherwise be filtered. */
+  preserveSmallText: boolean;
+
+  // -- Search defaults --
+  /** Default for case-sensitive search. */
+  caseSensitive: boolean;
+  /** Default max search results (1–500). */
+  maxSearchResults: number;
+
+  // -- Screenshot defaults --
+  /** Default DPI for screenshot rendering (72–600). */
+  screenshotDpi: number;
+
   // -- Vision model selection --
   /** Preferred vision model as "provider/id". null = auto-select from registry. */
   visionModel: string | null;
@@ -42,12 +70,12 @@ export interface PiDocparserConfig {
    *  tool falls back to the active session model only. */
   autoSelectVisionModel: boolean;
 
-  // -- Quality & safety --
+  // -- Vision quality & safety --
   /** Screenshot DPI for visual analysis (72–600). */
   visualDpi: number;
   /** Cloud-call safety gate. */
   allowCloud: boolean;
-  /** Max pages to auto-select as visual candidates. */
+  /** Max pages to auto-select as visual candidates (1–32). */
   maxCandidatePages: number;
   /** Threshold (0–1) for auto-detecting visual-candidate pages. */
   visualCandidateThreshold: number;
@@ -61,7 +89,7 @@ export interface PiDocparserConfig {
   maxDescriptionTokens: number | undefined;
 
   // -- Cache --
-  /** Max entries in the visual-description LRU cache. */
+  /** Max entries in the LRU result cache. */
   cacheMax: number;
 }
 
@@ -78,15 +106,33 @@ export function isThinkingLevel(level: unknown): level is ThinkingLevel {
 }
 
 export const DEFAULT_CONFIG: PiDocparserConfig = {
+  // Parsing
+  defaultDpi: 150,
+  defaultOcrLanguage: "eng",
+  ocrEnabled: true,
+  defaultMaxPages: 1000,
+  defaultOutputFormat: "text",
+  imageMode: "off",
+  extractLinks: true,
+  preserveSmallText: false,
+  // Search
+  caseSensitive: false,
+  maxSearchResults: 50,
+  // Screenshots
+  screenshotDpi: 150,
+  // Vision model
   visionModel: null,
   autoSelectVisionModel: true,
+  // Vision quality
   visualDpi: 220,
   allowCloud: false,
   maxCandidatePages: 6,
   visualCandidateThreshold: 0.4,
+  // Vision tuning
   thinking: false,
   thinkingLevel: "medium",
   maxDescriptionTokens: undefined,
+  // Cache
   cacheMax: 50,
 };
 
@@ -136,6 +182,42 @@ export function normalizeConfig(raw: unknown): PiDocparserConfig {
   if (!raw || typeof raw !== "object") return base;
   const obj = raw as Record<string, unknown>;
 
+  // -- Parsing --
+  if (typeof obj.defaultDpi === "number" && Number.isFinite(obj.defaultDpi)) {
+    const dpi = Math.floor(obj.defaultDpi);
+    if (dpi >= 72 && dpi <= 600) base.defaultDpi = dpi;
+  }
+  if (typeof obj.defaultOcrLanguage === "string" && obj.defaultOcrLanguage.length > 0) {
+    base.defaultOcrLanguage = obj.defaultOcrLanguage;
+  }
+  if (typeof obj.ocrEnabled === "boolean") base.ocrEnabled = obj.ocrEnabled;
+  if (typeof obj.defaultMaxPages === "number" && Number.isFinite(obj.defaultMaxPages)) {
+    const n = Math.floor(obj.defaultMaxPages);
+    if (n >= 1 && n <= 10000) base.defaultMaxPages = n;
+  }
+  if (obj.defaultOutputFormat === "text" || obj.defaultOutputFormat === "json") {
+    base.defaultOutputFormat = obj.defaultOutputFormat;
+  }
+  if (obj.imageMode === "off" || obj.imageMode === "placeholder" || obj.imageMode === "embed") {
+    base.imageMode = obj.imageMode;
+  }
+  if (typeof obj.extractLinks === "boolean") base.extractLinks = obj.extractLinks;
+  if (typeof obj.preserveSmallText === "boolean") base.preserveSmallText = obj.preserveSmallText;
+
+  // -- Search --
+  if (typeof obj.caseSensitive === "boolean") base.caseSensitive = obj.caseSensitive;
+  if (typeof obj.maxSearchResults === "number" && Number.isFinite(obj.maxSearchResults)) {
+    const n = Math.floor(obj.maxSearchResults);
+    if (n >= 1 && n <= 500) base.maxSearchResults = n;
+  }
+
+  // -- Screenshots --
+  if (typeof obj.screenshotDpi === "number" && Number.isFinite(obj.screenshotDpi)) {
+    const dpi = Math.floor(obj.screenshotDpi);
+    if (dpi >= 72 && dpi <= 600) base.screenshotDpi = dpi;
+  }
+
+  // -- Vision model --
   if (typeof obj.visionModel === "string") {
     base.visionModel = parseModelRef(obj.visionModel) ? obj.visionModel.trim() : null;
   } else if (obj.visionModel === null) {
@@ -143,12 +225,12 @@ export function normalizeConfig(raw: unknown): PiDocparserConfig {
   }
   if (typeof obj.autoSelectVisionModel === "boolean") base.autoSelectVisionModel = obj.autoSelectVisionModel;
 
+  // -- Vision quality --
   if (typeof obj.visualDpi === "number" && Number.isFinite(obj.visualDpi)) {
     const dpi = Math.floor(obj.visualDpi);
     if (dpi >= 72 && dpi <= 600) base.visualDpi = dpi;
   }
   if (typeof obj.allowCloud === "boolean") base.allowCloud = obj.allowCloud;
-
   if (typeof obj.maxCandidatePages === "number" && Number.isFinite(obj.maxCandidatePages)) {
     const n = Math.floor(obj.maxCandidatePages);
     if (n >= 1 && n <= 32) base.maxCandidatePages = n;
@@ -158,13 +240,14 @@ export function normalizeConfig(raw: unknown): PiDocparserConfig {
     if (t >= 0 && t <= 1) base.visualCandidateThreshold = t;
   }
 
+  // -- Vision tuning --
   if (typeof obj.thinking === "boolean") base.thinking = obj.thinking;
   if (isThinkingLevel(obj.thinkingLevel)) base.thinkingLevel = obj.thinkingLevel;
-
   if (typeof obj.maxDescriptionTokens === "number" && Number.isFinite(obj.maxDescriptionTokens) && obj.maxDescriptionTokens > 0) {
     base.maxDescriptionTokens = Math.floor(obj.maxDescriptionTokens);
   }
 
+  // -- Cache --
   if (typeof obj.cacheMax === "number" && Number.isFinite(obj.cacheMax) && obj.cacheMax > 0) {
     base.cacheMax = Math.floor(obj.cacheMax);
   }

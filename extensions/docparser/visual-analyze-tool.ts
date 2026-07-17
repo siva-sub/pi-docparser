@@ -19,7 +19,8 @@ import { runVisualAnalysis, describeFinding, summarizeConfig } from "./visual-ru
 import type { DocumentVisualAnalyzeDetails } from "./visual-tool-types.ts";
 import { maskSecret, normalizeRemoteUrl } from "./util.ts";
 import { VISUAL_ANALYSIS_SYSTEM_PROMPT, buildVisualAnalysisUserText } from "./visual-client.ts";
-import { showModelPicker } from "./vision-model-selector.ts";
+import { VisionModelSelectorComponent, type VisionModelSelectorResult } from "./vision-model-selector.ts";
+import { DocparserSettingsComponent, type DocparserSettingsResult } from "./settings-component.ts";
 import {
   type PiDocparserConfig,
   readConfig,
@@ -28,6 +29,7 @@ import {
   resolveModelRef,
   isVisionModel,
   isThinkingLevel,
+  formatModelRef,
 } from "./config.ts";
 
 type DocumentVisualAnalyzeParams = Static<typeof DocumentVisualAnalyzeSchema>;
@@ -540,24 +542,15 @@ const MODEL_COMMAND_DESCRIPTION =
 function showModelStatus(ctx: ExtensionCommandContext): void {
   const cfg = readConfig();
   const lines: string[] = [];
-  lines.push(`docparser vision model: ${cfg.visionModel ?? "(auto-select from registry)"}`);
-  lines.push(`Auto-select: ${cfg.autoSelectVisionModel ? "on" : "off"}`);
-  lines.push(`DPI: ${cfg.visualDpi} · allowCloud: ${cfg.allowCloud ? "yes" : "no"}`);
-  lines.push(`Thinking: ${cfg.thinking ? `on (${cfg.thinkingLevel})` : "off"}`);
-  lines.push(`Max candidate pages: ${cfg.maxCandidatePages} · threshold: ${cfg.visualCandidateThreshold}`);
-  lines.push(`Cache: ${cfg.cacheMax} entries`);
-
-  const allModels = ctx.modelRegistry.getAll();
-  const { vision } = findVisionModels(allModels);
-  lines.push(
-    `Registry: ${vision.length} vision-capable model(s) available`,
-  );
-  if (vision.length > 0) {
-    lines.push(
-      `  ${vision.map((m) => `${m.provider}/${m.id}${cfg.visionModel === `${m.provider}/${m.id}` ? " ✓" : ""}`).join(", ")}`,
-    );
-  }
-
+  lines.push("📄 Parsing: " +
+    `dpi=${cfg.defaultDpi} ocr=${cfg.ocrEnabled ? "on" : "off"}(${cfg.defaultOcrLanguage}) maxPages=${cfg.defaultMaxPages}`);
+  lines.push(`   format=${cfg.defaultOutputFormat} images=${cfg.imageMode} links=${cfg.extractLinks ? "on" : "off"} smallText=${cfg.preserveSmallText ? "on" : "off"}`);
+  lines.push(`🔍 Search: caseSensitive=${cfg.caseSensitive} maxResults=${cfg.maxSearchResults}`);
+  lines.push(`📸 Screenshots: dpi=${cfg.screenshotDpi}`);
+  lines.push(`👁 Vision: model=${cfg.visionModel ?? "auto"} cloud=${cfg.allowCloud ? "yes" : "no"}`);
+  lines.push(`   dpi=${cfg.visualDpi} candidates=${cfg.maxCandidatePages} threshold=${cfg.visualCandidateThreshold}`);
+  lines.push(`   thinking=${cfg.thinking ? `on (${cfg.thinkingLevel})` : "off"} maxTokens=${cfg.maxDescriptionTokens ?? "unlimited"}`);
+  lines.push(`💾 Cache: ${cfg.cacheMax} entries`);
   ctx.ui.notify(lines.join("\n"), "info");
 }
 
@@ -570,10 +563,69 @@ async function showModelPickerCmd(ctx: ExtensionCommandContext): Promise<void> {
     return;
   }
 
-  const result = await showModelPicker(ctx);
-  if (result.cancelled) return;
-
   const cfg = readConfig();
+  const allModels = ctx.modelRegistry
+    .getAll()
+    .map((m) => ({ provider: m.provider, id: m.id, name: m.name, input: m.input, reasoning: m.reasoning }));
+
+  // Non-TUI fallback (headless / CLI-only sessions)
+  if ((ctx as any).mode !== "tui") {
+    const { vision } = findVisionModels(allModels);
+    if (vision.length === 0) {
+      ctx.ui.notify("No vision-capable models found. Add one with /model.", "error");
+      return;
+    }
+    const labels = ["⟳ Auto"];
+    const refs: (string | null)[] = [null];
+    for (const m of vision) {
+      const ref = formatModelRef(m.provider, m.id);
+      const name = m.name || m.id;
+      labels.push(`${name} [${ref}]${cfg.visionModel === ref ? " ✓" : ""}`);
+      refs.push(ref);
+    }
+    const picked = await ctx.ui.select("Vision model for docparser", labels);
+    if (picked === undefined) return;
+    const idx = labels.indexOf(picked);
+    if (idx < 0) return;
+    const ref = refs[idx];
+    const updated = { ...cfg, visionModel: ref };
+    const path = writeConfig(updated);
+    ctx.ui.notify(
+      ref
+        ? `Docparser vision model set to ${ref}. Config: ${path}`
+        : "Docparser vision model cleared. Will auto-select from registry.",
+      "info",
+    );
+    return;
+  }
+
+  // TUI: full VisionModelSelectorComponent (same pattern as pi-vision-handoff)
+  const result = await ctx.ui.custom<VisionModelSelectorResult>((tui, theme, _kb, done) => {
+    const selector = new VisionModelSelectorComponent(
+      theme,
+      allModels,
+      cfg.visionModel,
+      (r) => done(r),
+    );
+    return {
+      render(width: number) {
+        return selector.render(width);
+      },
+      invalidate() {
+        selector.invalidate();
+      },
+      handleInput(data: string) {
+        selector.handleInput(data);
+        tui.requestRender();
+      },
+    };
+  });
+
+  if (!result || result.cancelled) {
+    ctx.ui.notify("Docparser model picker cancelled.", "info");
+    return;
+  }
+
   const updated = { ...cfg, visionModel: result.ref };
   const path = writeConfig(updated);
   ctx.ui.notify(
@@ -688,6 +740,87 @@ export function registerModelCommand(pi: ExtensionAPI): void {
       ctx.ui.notify(
         `Unknown subcommand "${subcommand}". Use /docparser-model help for usage.`,
         "warning",
+      );
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// /docparser-config command — full interactive settings
+// ---------------------------------------------------------------------------
+
+const CONFIG_COMMAND = "docparser-config";
+const CONFIG_COMMAND_DESCRIPTION =
+  "Open interactive settings panel for all docparser configuration";
+
+export function registerConfigCommand(pi: ExtensionAPI): void {
+  pi.registerCommand(CONFIG_COMMAND, {
+    description: CONFIG_COMMAND_DESCRIPTION,
+    getArgumentCompletions(prefix: string) {
+      const subcommands = ["status"];
+      const matches = subcommands.filter((s) => s.startsWith(prefix));
+      return matches.length > 0 ? matches.map((s) => ({ value: s, label: s })) : null;
+    },
+    handler: async (args, ctx) => {
+      const sub = args.trim().toLowerCase();
+
+      if (sub === "status") {
+        showModelStatus(ctx);
+        return;
+      }
+
+      if (!ctx.hasUI) {
+        ctx.ui.notify(
+          "/docparser-config requires interactive mode. Use /docparser-config status to see current values.",
+          "error",
+        );
+        return;
+      }
+
+      const cfg = readConfig();
+      const allModels = ctx.modelRegistry
+        .getAll()
+        .map((m) => ({ provider: m.provider, id: m.id, name: m.name, input: m.input, reasoning: m.reasoning }));
+
+      if ((ctx as any).mode !== "tui") {
+        showModelStatus(ctx);
+        ctx.ui.notify(
+          "Non-TUI mode: shown current config. Use /docparser-config in interactive mode for full settings editor.",
+          "info",
+        );
+        return;
+      }
+
+      const result = await ctx.ui.custom<DocparserSettingsResult>((tui, theme, _kb, done) => {
+        const editor = new DocparserSettingsComponent(
+          theme,
+          cfg,
+          allModels,
+          (r) => done(r),
+        );
+        return {
+          render(width: number) {
+            return editor.render(width);
+          },
+          invalidate() {
+            editor.invalidate();
+          },
+          handleInput(data: string) {
+            editor.handleInput(data);
+            tui.requestRender();
+          },
+        };
+      });
+
+      if (!result || result.cancelled) {
+        ctx.ui.notify("Docparser settings unchanged.", "info");
+        return;
+      }
+
+      const path = writeConfig(result.config);
+      ctx.ui.notify(
+        `Docparser settings saved. Config: ${path}`,
+        "info",
       );
     },
   });
