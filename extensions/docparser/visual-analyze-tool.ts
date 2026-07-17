@@ -19,9 +19,9 @@ import { runVisualAnalysis, describeFinding, summarizeConfig } from "./visual-ru
 import type { DocumentVisualAnalyzeDetails } from "./visual-tool-types.ts";
 import { maskSecret, normalizeRemoteUrl } from "./util.ts";
 import { VISUAL_ANALYSIS_SYSTEM_PROMPT, buildVisualAnalysisUserText } from "./visual-client.ts";
+import { showModelPicker } from "./vision-model-selector.ts";
 import {
   type PiDocparserConfig,
-  type RegistryModelEntry,
   readConfig,
   writeConfig,
   findVisionModels,
@@ -374,8 +374,8 @@ export function registerDocumentVisualAnalyzeTool(pi: ExtensionAPI) {
             ? `${activeModel.provider}/${activeModel.id}`
             : "(none)";
           const visionHint = visionRefs
-            ? `Available vision models in your registry: ${visionRefs}. Configure one with PI_DOCPARSER_VISUAL_BASE_URL and PI_DOCPARSER_VISUAL_MODEL, or use /docparser-model to pick one.`
-            : "No vision-capable models found in your registry. Configure a vision model with /model or PI_DOCPARSER_VISUAL_* env vars.";
+            ? `Available vision models: ${visionRefs}. Pick one: /docparser-model`
+            : "No vision-capable models found. Add one with /model.";
           throw new Error(
             `No image-capable model is available for visual analysis. Active model ${activeLabel} does not accept images. ${visionHint}`,
           );
@@ -561,7 +561,7 @@ function showModelStatus(ctx: ExtensionCommandContext): void {
   ctx.ui.notify(lines.join("\n"), "info");
 }
 
-async function showModelPicker(ctx: ExtensionCommandContext): Promise<void> {
+async function showModelPickerCmd(ctx: ExtensionCommandContext): Promise<void> {
   if (!ctx.hasUI) {
     ctx.ui.notify(
       "/docparser-model requires interactive mode. Set directly with /docparser-model <provider/id>.",
@@ -570,42 +570,15 @@ async function showModelPicker(ctx: ExtensionCommandContext): Promise<void> {
     return;
   }
 
+  const result = await showModelPicker(ctx);
+  if (result.cancelled) return;
+
   const cfg = readConfig();
-  const allModels = ctx.modelRegistry.getAll();
-  const { vision, textOnly } = findVisionModels(allModels);
-
-  // Build display list: None, then vision models (👁), then text-only.
-  const items: { label: string; ref: string | null; desc: string }[] = [
-    { label: "None (auto-select from registry)", ref: null, desc: "" },
-  ];
-  for (const m of vision) {
-    const current = cfg.visionModel === `${m.provider}/${m.id}` ? " (current)" : "";
-    items.push({
-      label: `👁 ${m.provider}/${m.id}${current}`,
-      ref: `${m.provider}/${m.id}`,
-      desc: m.name ?? "",
-    });
-  }
-  for (const m of textOnly) {
-    items.push({
-      label: `  ${m.provider}/${m.id}`,
-      ref: `${m.provider}/${m.id}`,
-      desc: m.name ?? "",
-    });
-  }
-
-  // Use interactive select for both TUI and non-TUI modes
-  const labels = items.map((it) => it.label);
-  const picked = await ctx.ui.select("Vision model for docparser", labels);
-  if (picked === undefined) return;
-  const idx = labels.indexOf(picked);
-  if (idx < 0) return;
-  const selected = items[idx];
-  const updated = { ...cfg, visionModel: selected.ref };
+  const updated = { ...cfg, visionModel: result.ref };
   const path = writeConfig(updated);
   ctx.ui.notify(
-    selected.ref
-      ? `Docparser vision model set to ${selected.ref}. Config: ${path}`
+    result.ref
+      ? `Docparser vision model set to ${result.ref}. Config: ${path}`
       : "Docparser vision model cleared. Will auto-select from registry.",
     "info",
   );
@@ -637,7 +610,7 @@ export function registerModelCommand(pi: ExtensionAPI): void {
           );
           return;
         }
-        await showModelPicker(ctx);
+        await showModelPickerCmd(ctx);
         return;
       }
 
